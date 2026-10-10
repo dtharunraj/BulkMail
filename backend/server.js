@@ -7,9 +7,13 @@ require("dotenv").config();
 
 const app = express();
 
-app.use(cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173"
-}));
+app.use(
+    cors({
+        origin:
+            process.env.FRONTEND_URL ||
+            "http://localhost:5173",
+    })
+);
 
 app.use(express.json());
 
@@ -21,12 +25,12 @@ const oauth2Client = new google.auth.OAuth2(
 );
 
 oauth2Client.setCredentials({
-    refresh_token: process.env.GOOGLE_REFRESH_TOKEN
+    refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
 });
 
 const gmail = google.gmail({
     version: "v1",
-    auth: oauth2Client
+    auth: oauth2Client,
 });
 
 // Admin Login
@@ -35,7 +39,7 @@ app.post("/api/auth/login", (req, res) => {
 
     if (!username || !password) {
         return res.status(400).json({
-            message: "Username and password are required"
+            message: "Username and password are required",
         });
     }
 
@@ -45,43 +49,44 @@ app.post("/api/auth/login", (req, res) => {
     ) {
         return res.json({
             message: "Login successful",
-            token: "bulkmail-admin-session"
+            token: "bulkmail-admin-session",
         });
     }
 
     return res.status(401).json({
-        message: "Invalid username or password"
+        message: "Invalid username or password",
     });
 });
 
-// MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI)
-    .then(() => console.log("MongoDB connected successfully"))
-    .catch(error => console.error("MongoDB error:", error.message));
-
 // Email History Schema
-const Mail = mongoose.model("Mail", new mongoose.Schema({
-    subject: {
-        type: String,
-        required: true
-    },
-    body: {
-        type: String,
-        required: true
-    },
-    recipients: [String],
-    sentTo: [String],
-    failedTo: [String],
-    status: {
-        type: String,
-        enum: ["success", "partial", "failed"],
-        default: "failed"
-    },
-    error: {
-        type: String,
-        default: ""
-    }
-}, { timestamps: true }));
+const Mail = mongoose.model(
+    "Mail",
+    new mongoose.Schema(
+        {
+            subject: {
+                type: String,
+                required: true,
+            },
+            body: {
+                type: String,
+                required: true,
+            },
+            recipients: [String],
+            sentTo: [String],
+            failedTo: [String],
+            status: {
+                type: String,
+                enum: ["success", "partial", "failed"],
+                default: "failed",
+            },
+            error: {
+                type: String,
+                default: "",
+            },
+        },
+        { timestamps: true }
+    )
+);
 
 // Check Backend
 app.get("/", (req, res) => {
@@ -106,7 +111,7 @@ async function sendEmail(to, subject, body) {
         "Content-Type: text/plain; charset=UTF-8",
         "Content-Transfer-Encoding: base64",
         "",
-        encodedBody
+        encodedBody,
     ].join("\r\n");
 
     const raw = Buffer
@@ -115,7 +120,7 @@ async function sendEmail(to, subject, body) {
 
     return gmail.users.messages.send({
         userId: "me",
-        requestBody: { raw }
+        requestBody: { raw },
     });
 }
 
@@ -123,9 +128,7 @@ async function sendEmail(to, subject, body) {
 app.post("/api/mail/send", async (req, res) => {
     const { subject, body, recipients } = req.body;
 
-    console.log("\n========== BULKMAIL REQUEST ==========");
-    console.log("Subject:", subject);
-    console.log("Recipients received:", recipients);
+    console.log("========== BULKMAIL REQUEST ==========");
 
     if (
         typeof subject !== "string" ||
@@ -136,38 +139,49 @@ app.post("/api/mail/send", async (req, res) => {
         recipients.length === 0
     ) {
         return res.status(400).json({
-            message: "Subject, body and recipient emails are required"
+            message: "Subject, body and recipient emails are required",
         });
     }
 
     const emails = [
         ...new Set(
             recipients
-                .filter(email => typeof email === "string")
-                .map(email => email.trim().toLowerCase())
-                .filter(email =>
+                .filter((email) => typeof email === "string")
+                .map((email) => email.trim().toLowerCase())
+                .filter((email) =>
                     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
                 )
-        )
+        ),
     ];
 
-    console.log("Valid email count:", emails.length);
+    console.log("Valid recipient count:", emails.length);
 
     if (emails.length === 0) {
         return res.status(400).json({
-            message: "Valid recipient emails are required"
+            message: "Valid recipient emails are required",
         });
     }
 
-    if (
-        !process.env.EMAIL_USER ||
-        !process.env.GOOGLE_CLIENT_ID ||
-        !process.env.GOOGLE_CLIENT_SECRET ||
-        !process.env.GOOGLE_REFRESH_TOKEN ||
-        !process.env.GOOGLE_REDIRECT_URI
-    ) {
+    const requiredVariables = [
+        "EMAIL_USER",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "GOOGLE_REFRESH_TOKEN",
+        "GOOGLE_REDIRECT_URI",
+    ];
+
+    const missingVariables = requiredVariables.filter(
+        (key) => !process.env[key]
+    );
+
+    if (missingVariables.length > 0) {
+        console.error(
+            "Missing environment variable names:",
+            missingVariables
+        );
+
         return res.status(500).json({
-            message: "Gmail API environment variables are missing"
+            message: "Gmail API environment variables are missing",
         });
     }
 
@@ -180,10 +194,9 @@ app.post("/api/mail/send", async (req, res) => {
             recipients: emails,
             sentTo: [],
             failedTo: [],
-            status: "failed"
+            status: "failed",
         });
 
-        // Gmail API sends emails over HTTPS
         for (const email of emails) {
             try {
                 const response = await sendEmail(
@@ -192,31 +205,33 @@ app.post("/api/mail/send", async (req, res) => {
                     body.trim()
                 );
 
-                console.log("Email sent:", email);
-                console.log("Message ID:", response.data.id);
+                console.log("Email sent successfully:", email);
+                console.log("Gmail message ID:", response.data.id);
 
                 record.sentTo.push(email);
             } catch (error) {
-                console.error(
-                    "Email failed:",
-                    email,
-                    error.response?.data?.error?.message ||
-                    error.message
-                );
+                // Actual Gmail API error appears in Render Logs.
+                console.error("GMAIL API ERROR:", {
+                    recipient: email,
+                    status: error.response?.status,
+                    data: error.response?.data,
+                    message: error.message,
+                });
 
                 record.failedTo.push(email);
             }
 
-            // Save progress after each recipient
-            record.status = record.sentTo.length === emails.length
-                ? "success"
-                : record.sentTo.length > 0
-                    ? "partial"
-                    : "failed";
+            record.status =
+                record.sentTo.length === emails.length
+                    ? "success"
+                    : record.sentTo.length > 0
+                        ? "partial"
+                        : "failed";
 
-            record.error = record.failedTo.length > 0
-                ? `Failed for ${record.failedTo.length} recipient(s)`
-                : "";
+            record.error =
+                record.failedTo.length > 0
+                    ? `Failed for ${record.failedTo.length} recipient(s)`
+                    : "";
 
             await record.save();
         }
@@ -226,40 +241,38 @@ app.post("/api/mail/send", async (req, res) => {
         console.log("Sent:", record.sentTo.length);
         console.log("Failed:", record.failedTo.length);
         console.log("Status:", record.status);
-        console.log("===================================\n");
+        console.log("===================================");
 
         return res.status(200).json({
-            message: record.status === "success"
-                ? "Emails sent successfully"
-                : record.status === "partial"
-                    ? "Some emails failed"
-                    : "Email sending failed",
-            record
+            message:
+                record.status === "success"
+                    ? "Emails sent successfully"
+                    : record.status === "partial"
+                        ? "Some emails failed"
+                        : "Email sending failed",
+            record,
+        });
+    } catch (error) {
+        console.error("SEND MAIL ERROR:", {
+            status: error.response?.status,
+            data: error.response?.data,
+            message: error.message,
         });
 
-    } catch (error) {
-        console.error(
-            "Send mail error:",
-            error.response?.data?.error?.message || error.message
-        );
-
         if (record) {
-            record.status = record.sentTo.length > 0
-                ? "partial"
-                : "failed";
+            record.status =
+                record.sentTo.length > 0 ? "partial" : "failed";
 
-            record.error =
-                error.response?.data?.error?.message ||
-                error.message;
+            record.error = "Unable to complete email sending";
 
-            await record.save().catch(saveError => {
+            await record.save().catch((saveError) => {
                 console.error("History save error:", saveError.message);
             });
         }
 
         return res.status(500).json({
             message: "Unable to send emails",
-            record: record || null
+            record: record || null,
         });
     }
 });
@@ -274,7 +287,7 @@ app.get("/api/mail/history", async (req, res) => {
         console.error("History error:", error.message);
 
         return res.status(500).json({
-            message: "Unable to fetch history"
+            message: "Unable to fetch history",
         });
     }
 });
@@ -284,7 +297,7 @@ app.delete("/api/mail/history/:id", async (req, res) => {
     try {
         if (!mongoose.isValidObjectId(req.params.id)) {
             return res.status(400).json({
-                message: "Invalid history ID"
+                message: "Invalid history ID",
             });
         }
 
@@ -292,18 +305,18 @@ app.delete("/api/mail/history/:id", async (req, res) => {
 
         if (!record) {
             return res.status(404).json({
-                message: "History record not found"
+                message: "History record not found",
             });
         }
 
         return res.json({
-            message: "History deleted successfully"
+            message: "History deleted successfully",
         });
     } catch (error) {
         console.error("Delete error:", error.message);
 
         return res.status(500).json({
-            message: "Unable to delete history"
+            message: "Unable to delete history",
         });
     }
 });
@@ -311,8 +324,15 @@ app.delete("/api/mail/history/:id", async (req, res) => {
 // Start server after MongoDB connects
 const PORT = process.env.PORT || 5000;
 
-mongoose.connection.once("open", () => {
-    app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
+mongoose
+    .connect(process.env.MONGODB_URI)
+    .then(() => {
+        console.log("MongoDB connected successfully");
+
+        app.listen(PORT, () => {
+            console.log(`Server running on port ${PORT}`);
+        });
+    })
+    .catch((error) => {
+        console.error("MongoDB connection error:", error.message);
     });
-});
