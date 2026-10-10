@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api from "../api";
+import api from "./api";
 const badge = {
     success: "bg-green-600",
     partial: "bg-yellow-600",
