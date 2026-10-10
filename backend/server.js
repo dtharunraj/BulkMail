@@ -7,6 +7,65 @@ require("dotenv").config();
 
 const app = express();
 
+function createMailTransporter() {
+    const user = process.env.EMAIL_USER;
+    const pass = process.env.EMAIL_PASS;
+    const host = process.env.SMTP_HOST;
+
+    if (!user || !pass) {
+        const error = new Error("EMAIL_USER and EMAIL_PASS must be configured");
+        error.code = "SMTP_CONFIG";
+        throw error;
+    }
+
+    if (host) {
+        const port = Number(process.env.SMTP_PORT || 587);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+            const error = new Error("SMTP_PORT must be a valid port number");
+            error.code = "SMTP_CONFIG";
+            throw error;
+        }
+
+        return nodemailer.createTransport({
+            host,
+            port,
+            secure: process.env.SMTP_SECURE
+                ? process.env.SMTP_SECURE.toLowerCase() === "true"
+                : port === 465,
+            auth: { user, pass }
+        });
+    }
+
+    if (user.toLowerCase().endsWith("@gmail.com")) {
+        return nodemailer.createTransport({
+            service: "gmail",
+            auth: { user, pass }
+        });
+    }
+
+    const error = new Error(
+        "SMTP_HOST is required for non-Gmail email accounts"
+    );
+    error.code = "SMTP_CONFIG";
+    throw error;
+}
+
+function getMailErrorMessage(error) {
+    if (error.code === "SMTP_CONFIG") {
+        return error.message;
+    }
+
+    if (error.code === "EAUTH" || error.responseCode === 535) {
+        return "SMTP authentication failed. Check EMAIL_USER and EMAIL_PASS; Gmail requires an app password.";
+    }
+
+    if (["EDNS", "ECONNECTION", "ECONNREFUSED", "ETIMEDOUT", "ESOCKET"].includes(error.code)) {
+        return "Could not connect to the SMTP server. Check SMTP_HOST, SMTP_PORT and SMTP_SECURE.";
+    }
+
+    return "Email provider rejected delivery. Check the backend log for details.";
+}
+
 app.use(cors({
     origin: process.env.FRONTEND_URL || "http://localhost:5173"
 }));
@@ -114,18 +173,13 @@ app.post("/api/mail/send", async (req, res) => {
             failedTo: []
         });
 
-        const transporter = nodemailer.createTransport({
-            service: "gmail",
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS
-            }
-        });
+        const transporter = createMailTransporter();
 
         // Verify email connection
         await transporter.verify();
         console.log("Email server connection successful");
 
+        const deliveryErrors = new Set();
         for (const email of emails) {
             try {
                 const info = await transporter.sendMail({
@@ -142,6 +196,7 @@ app.post("/api/mail/send", async (req, res) => {
             } catch (error) {
                 console.error("Email failed:", email, error.message);
                 record.failedTo.push(email);
+                deliveryErrors.add(getMailErrorMessage(error));
             }
         }
 
@@ -153,9 +208,11 @@ app.post("/api/mail/send", async (req, res) => {
             record.status = "failed";
         }
 
-        if (record.failedTo.length > 0) {
-            record.error =
-                `Failed for ${record.failedTo.length} recipient(s)`;
+        if (deliveryErrors.size > 0) {
+            record.error = [
+                `Failed for ${record.failedTo.length} recipient(s).`,
+                ...deliveryErrors
+            ].join(" ");
         }
 
         await record.save();
@@ -181,12 +238,12 @@ app.post("/api/mail/send", async (req, res) => {
 
         if (record) {
             record.status = "failed";
-            record.error = error.message;
+            record.error = getMailErrorMessage(error);
             await record.save().catch(console.error);
         }
 
         return res.status(500).json({
-            message: "Unable to send emails",
+            message: getMailErrorMessage(error),
             record: record || null
         });
     }
