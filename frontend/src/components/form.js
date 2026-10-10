@@ -56,7 +56,11 @@ function ComposeForm() {
       .catch((err) =>
         setStatus({
           type: "error",
-          message: err.response?.data?.message || "Failed to send emails",
+          message:
+            err.response?.data?.message ||
+            (err.request
+              ? "Could not reach the mail server. Check that the backend is running."
+              : "Failed to send emails"),
         })
       )
       .finally(() => setSending(false));
